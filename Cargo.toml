@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
+clearscreen = "1.0"
+regex = "1.7"
+termcolor = "1.1"

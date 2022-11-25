@@ -1,69 +1,312 @@
+use std::ascii;
 use std::collections::HashMap;
+use std::fmt;
+use std::fmt::Formatter;
+use std::io::{self, Write};
+use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
+use regex::Regex;
 
 fn main() -> Result<()> {
-    let game = Game::new(3)?;
-    println!("{}", game.render_board());
+    let mut game = Game::new(3)?;
+    while game.winner == None {
+        try_execute_turn(&mut game)?;
+    }
+    // render game board one last time to display final result
+    try_execute_turn(&mut game)?;
     Ok(())
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+fn try_execute_turn(game: &mut Game) -> Result<()> {
+    clearscreen::clear()?;
+    let current_player = game.get_current_turn_player();
+    println!("{}'s turn", current_player);
+    println!();
+    println!("{}", game.render_board());
+    // print notification, if any
+    if let Some(notification) = &game.notification {
+        println!("{}", notification);
+        println!();
+    }
+    if game.winner == None {
+        print!("Enter coordinates to place your {}: ", current_player.mark);
+        io::stdout().flush()?;
+        let mut unparsed_coords = String::new();
+        io::stdin().read_line(&mut unparsed_coords)?;
+        let coords = Coordinates::from_user_input(&unparsed_coords)?;
+        game.update_board(coords, current_player)?;
+        game.check_for_victory();
+    }
+    Ok(())
+}
+
+// zero-indexed!
+struct Indices {
+    column: usize,
+    row: usize,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 struct Coordinates {
     column: char,
-    row: u8,
+    row: usize, // one-indexed!
+}
+
+impl Coordinates {
+    const COLUMN_LETTERS: [char; Game::MAX_NUM_ROWS_OR_COLUMNS as usize] =
+        ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
+    fn from_indices(indices: &Indices) -> Result<Coordinates> {
+        let row = indices.row + 1;
+        let &column = Self::COLUMN_LETTERS.get(indices.column).context(format!(
+            "No letter found to match zero-indexed column number {}; there are {} letter(s) total",
+            indices.column,
+            Self::COLUMN_LETTERS.len()
+        ))?;
+        Ok(Coordinates { row, column })
+    }
+
+    fn from_user_input(input: &str) -> Result<Coordinates> {
+        // Match a single alphabetical character followed by a number with one or more digits;
+        // whitespace and arbitrary punctuation are allowed at the beginning, end, and in between
+        // the character and digits (just not within the digits).
+        let re =
+            Regex::new(r"^[\s|[[:punct:]]]*([[:alpha:]])[\s|[[:punct:]]]*(\d+)[\s|[[:punct:]]]*$")?;
+        let cap = re
+            .captures(input)
+            .context(format!("Could not parse '{}' as coords", input.trim()))?;
+        let column = char::from_str(&cap[1])?.to_ascii_uppercase();
+        let row = usize::from_str(&cap[2])?;
+        Ok(Self { column, row })
+    }
+}
+
+impl fmt::Display for Coordinates {
+    // print coords as e.g. "A1"
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", self.column, self.row)
+    }
 }
 
 #[derive(Debug)]
-struct Tile<'a> {
-    occupation_state: TileOccupationState<'a>,
+struct Tile {
+    occupation_state: TileOccupationState,
     display_state: TileDisplayState,
 }
 
-#[derive(Debug)]
-enum TileOccupationState<'a> {
+#[derive(Debug, Copy, Clone)]
+enum TileOccupationState {
     Empty,
-    Occupied(&'a Player),
+    Occupied(Player),
 }
 
-// lets us display all the tiles involved in a win in green
+// lets us render the winning line of tiles in green
 #[derive(Debug)]
 enum TileDisplayState {
+    Error,
+    NewlyCreated,
     Normal,
     Victory,
 }
 
 #[derive(Debug)]
-struct BoardState<'a> {
-    tiles: HashMap<Coordinates, Tile<'a>>,
+struct Board {
+    tiles: HashMap<Coordinates, Tile>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 struct Player {
     number: u8,
     mark: char,
 }
 
-#[derive(Debug)]
-struct Game<'a> {
-    pub players: Vec<Player>,
-    board_state: BoardState<'a>,
-    grid_dimensions: u8,
-    turn_number: u32,
-    winner: Option<&'a Player>,
+impl fmt::Display for Player {
+    // print as e.g. "Player 1"
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Player {}", self.number)
+    }
 }
 
-impl Game<'_> {
-    const MIN_NUM_ROWS_OR_COLUMNS: u8 = 3;
-    // NOTE: be sure to also add more entries to COLUMN_HEADERS if increasing max num cols
-    const MAX_NUM_ROWS_OR_COLUMNS: u8 = 8;
-    const COLUMN_HEADERS: [char; 8] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+#[derive(Debug)]
+enum NotificationType {
+    Success,
+    Info,
+    Error,
+}
 
-    fn get_tile_from_indices(&self, row_index: usize, column_index: usize) -> Option<&Tile> {
-        let row = row_index as u8 + 1;
-        let column = Self::COLUMN_HEADERS[column_index];
-        let coords = Coordinates { row, column };
-        self.board_state.tiles.get(&coords)
+#[derive(Debug)]
+struct Notification {
+    message: String,
+    notification_type: NotificationType,
+}
+
+impl fmt::Display for Notification {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+#[derive(Debug)]
+struct Game {
+    pub players: Vec<Player>,
+    board: Board,
+    notification: Option<Notification>,
+    grid_dimensions: usize,
+    turn_number: usize,
+    winner: Option<Player>,
+}
+
+impl Game {
+    const MIN_NUM_ROWS_OR_COLUMNS: usize = 3;
+    const MAX_NUM_ROWS_OR_COLUMNS: usize = 8;
+
+    fn update_board(
+        &mut self,
+        coords_for_move: Coordinates,
+        player_for_move: Player,
+    ) -> Result<()> {
+        // validate against both the "coordinates don't even exist on game board"
+        // and the "coordinates refer to an already-occupied tile" edge cases
+        let tile_for_move: &Tile = self.board.tiles.get(&coords_for_move).context(format!(
+            "Could not find coordinates {} on game board",
+            coords_for_move
+        ))?;
+        if let TileOccupationState::Occupied(player) = tile_for_move.occupation_state {
+            return Err(anyhow!("Tile already occupied by {}", player));
+        }
+
+        // assemble new game board, clearing any previous display states from tiles
+        let mut new_tiles = HashMap::new();
+        for (coords, old_tile) in self.board.tiles.iter() {
+            let new_tile = if coords == &coords_for_move {
+                Tile {
+                    occupation_state: TileOccupationState::Occupied(player_for_move),
+                    display_state: TileDisplayState::NewlyCreated,
+                }
+            } else {
+                Tile {
+                    occupation_state: old_tile.occupation_state,
+                    display_state: TileDisplayState::Normal,
+                }
+            };
+            new_tiles.insert(coords.clone(), new_tile);
+        }
+        self.board = Board { tiles: new_tiles };
+        Ok(())
+    }
+
+    // checks for all possible victory states:
+    //   - either player occupies every tile in a single row
+    //   - either player occupies every tile in a single column
+    //   - either player occupies every tile in a full-length diagonal
+    // We evaluate the full set of tiles twice (once for columns and once for
+    // rows); we could optimize this down to one evaluation, though. We also
+    // build the collection of rows/columns/diagonals that can result in victory
+    // every time; we could instead do this only one time, at game start.
+    fn check_for_victory(&mut self) {
+        let mut possible_winning_indices_sets: Vec<Vec<Indices>> = Vec::new();
+
+        // build a list of indices for each row of game board
+        for row_index in 0..self.grid_dimensions {
+            let mut row_indices: Vec<Indices> = Vec::new();
+            for column_index in 0..self.grid_dimensions {
+                row_indices.push(Indices {
+                    row: row_index,
+                    column: column_index,
+                });
+            }
+            possible_winning_indices_sets.push(row_indices);
+        }
+
+        // build a list of indices for each column of game board
+        for column_index in 0..self.grid_dimensions {
+            let mut column_indices: Vec<Indices> = Vec::new();
+            for row_index in 0..self.grid_dimensions {
+                column_indices.push(Indices {
+                    row: row_index,
+                    column: column_index,
+                });
+            }
+            possible_winning_indices_sets.push(column_indices);
+        }
+
+        // build lists of indices for the upper-left-to-lower-right and lower-left-to-
+        // upper-right diagonals; both rely on the game board having equal length and width
+        let mut upper_left_diagonal_indices: Vec<Indices> = Vec::new();
+        let mut lower_left_diagonal_indices: Vec<Indices> = Vec::new();
+        let max_index = self.grid_dimensions - 1;
+        for index in 0..self.grid_dimensions {
+            upper_left_diagonal_indices.push(Indices {
+                row: index,
+                column: index,
+            });
+            lower_left_diagonal_indices.push(Indices {
+                row: max_index - index,
+                column: index,
+            });
+        }
+        possible_winning_indices_sets.push(upper_left_diagonal_indices);
+        possible_winning_indices_sets.push(lower_left_diagonal_indices);
+
+        for indices_set in possible_winning_indices_sets {
+            let maybe_winner = self.single_player_occupying_indices(&indices_set);
+            if let Some(player) = maybe_winner {
+                self.winner = Some(player);
+                self.notification = Some(Notification {
+                    message: format!("{} wins!", player),
+                    notification_type: NotificationType::Success,
+                });
+                // update the tiles from the winning row/column/diagonal to render as winners
+                let coordinates_set = indices_set
+                    .iter()
+                    .map(|indices| Coordinates::from_indices(indices).unwrap())
+                    .collect::<Vec<Coordinates>>();
+                for coordinates in coordinates_set {
+                    let mut tile = self.board.tiles.get_mut(&coordinates).unwrap();
+                    tile.display_state = TileDisplayState::Victory;
+                }
+                return;
+            }
+        }
+
+        // we will only reach this point if there was no winner
+        self.advance_turn();
+    }
+
+    // If every tile for the given indices is occupied AND is occupied by the
+    // same player, return that player. Else return None.
+    fn single_player_occupying_indices(&self, indices: &[Indices]) -> Option<Player> {
+        let mut maybe_running_occupier: Option<Player> = None;
+        let tiles = indices
+            .iter()
+            .map(|indices| Coordinates::from_indices(indices).unwrap())
+            .map(|coords| self.board.tiles.get(&coords).unwrap())
+            .collect::<Vec<&Tile>>();
+        for tile in tiles {
+            use TileOccupationState::*;
+            match (maybe_running_occupier, tile.occupation_state) {
+                (_, Empty) => return None,
+                (None, Occupied(tile_occupier)) => maybe_running_occupier = Some(tile_occupier),
+                (Some(running_occupier), Occupied(tile_occupier)) => {
+                    if running_occupier != tile_occupier {
+                        return None;
+                    } else {
+                        continue;
+                    }
+                }
+            }
+        }
+        maybe_running_occupier
+    }
+
+    fn advance_turn(&mut self) {
+        self.turn_number += 1;
+    }
+
+    fn get_current_turn_player(&self) -> Player {
+        let turn_index = (self.turn_number - 1) % 2;
+        self.players[turn_index]
     }
 
     fn render_board(&self) -> String {
@@ -74,7 +317,12 @@ impl Game<'_> {
         for row_index in 0..self.grid_dimensions as usize {
             let mut rendered_row = String::new();
             for column_index in 0..self.grid_dimensions as usize {
-                let tile = self.get_tile_from_indices(row_index, column_index).unwrap();
+                let coords = Coordinates::from_indices(&Indices {
+                    row: row_index,
+                    column: column_index,
+                })
+                .unwrap();
+                let tile = self.board.tiles.get(&coords).unwrap();
                 use TileOccupationState::*;
                 let tile_mark = match tile.occupation_state {
                     Empty => ' ',
@@ -100,7 +348,7 @@ impl Game<'_> {
         rendered_grid
     }
 
-    fn new(num_rows_or_columns: u8) -> Result<Self> {
+    fn new(num_rows_or_columns: usize) -> Result<Self> {
         if num_rows_or_columns < Self::MIN_NUM_ROWS_OR_COLUMNS
             || num_rows_or_columns > Self::MAX_NUM_ROWS_OR_COLUMNS
         {
@@ -125,10 +373,11 @@ impl Game<'_> {
         for row_index in 0..num_rows_or_columns {
             for column_index in 0..num_rows_or_columns {
                 tiles.insert(
-                    Coordinates {
-                        column: Self::COLUMN_HEADERS[column_index as usize],
-                        row: row_index + 1, // convert 0-indexed to user-facing 1-indexed
-                    },
+                    Coordinates::from_indices(&Indices {
+                        row: row_index,
+                        column: column_index,
+                    })
+                    .unwrap(),
                     Tile {
                         occupation_state: TileOccupationState::Empty,
                         display_state: TileDisplayState::Normal,
@@ -138,7 +387,8 @@ impl Game<'_> {
         }
         Ok(Self {
             players,
-            board_state: BoardState { tiles },
+            board: Board { tiles },
+            notification: None,
             grid_dimensions: num_rows_or_columns,
             turn_number: 1,
             winner: None,
@@ -146,21 +396,51 @@ impl Game<'_> {
     }
 }
 
-// add helper fn for getting current turn player (use turn number -1 to index into players vec,
-//   protecting against overflow from zero to neg 1)
-// add a `render_turn`
-// accept user input for coords
-// actually update board state every turn
-// actually check for victory at the end of every turn, print winner, stop game
-
-// be very friendly in stripping whitespace and accepting lowercase chars for coords
+// actually do render winning line of marks in green (using `termcolor` lib)
+// handle fact that coords may already be occupied more gracefully (updating notification
+//   and setting tile color to red, and NOT terminating program)
+// add column headers and row numbers to rendered board
+// use self.notification more widely
+// have notification say e.g. "last turn, player 1 placed their X at position B3".
+// how to ensure outdated notification has always been cleared? have a turn number on it, maybe?
+// if coords failed to parse, have some kind of special retry logic. Print prompt again?
+//   or perhaps print whole board again with updated error-containing board state, and even
+//   with some kind of persisted message attribute to print?
+// have color printing in notifications (e.g. winning message in green, at least part of
+//   any error message in red; may require a Notification struct with message and type,
+//   where type determines color and will prepend a red ERROR)
+// show a nice error message with min and max row num / col header if out of bounds
+// refactor column headers out to coordinates, renamed to something else?
+// refactor render_board into a new Board.render fn
+// find a way to mutate tiles, not rebuild whole board? only if I can prevent inconsistent state
+//   from partially-completed update, though. beware current way I set victory tiles one by one.
+// can I nuke Indices struct? if not, add comments to it and Coordinates about which is user-facing
+// refactor get_tile_from_indices to use Indices struct?
+// refactor so you'd only have a Coordinates object if it fit within game's board dimensions?
+// maybe display most recent move in yellow or something? to more easily see
+//   what changed? (an alternative is bold text)
+// provide friendly error message if coords unparsable
+// refactor check_for_victory into several fns? it does a lot. also figure out how best to advnce turn
+// try to have current-tile lookup and tile-replacement logic share a single get call if possible
+// accept user input for num rows/cols, and have some kind of 'welcome to game' message
+// don't recompile regex on every turn
+// sort out naming of 'indices' versus 'indices set'; latter isn't actually a set (but could be!)
 // use official turn-building logic even during init?
-// add ability to render a game board, incl coords
+// try to insert more context into my various error messages -- like, include any relevant coordinates
+// only build vec of vecs for rows/cols/diagonals that can result in victory one time, on game init
+// stash max_index somewhere so it's only defined once? and/or have a fn to calculate it?
+// do I need both a get_tile_from_indices and a get_mut_tile_from_indices? how to obviate need for both?
 // refactor out to multiple modules/files
+// refactor win-detection logic to something more elegant, that at least doesn't repeat self.winner assignment
+// fix up cross-talk between Coordinates and Game (Coordinates refers to an attr of Game)
+// optimize rows and columns building to a single iteration (in advance of victory check)
+//   try to do the same for diagonals: one iteration not two
+//   then update now-outdated comment above fn
+// share any coordinates-validating logic between initial game setup and within-turn user-input validation
 // refactor to smaller functions, esp with more `new()` functions
-// add test coverage
+// add test coverage, esp for coordinates parsing and full-game execution
 // remove many Debug derives
-// can I clean up 'cell' logic using map + join, so I join with '|'?
+// can I clean up 'cell' logic using map + join, so I join with '|' char?
 // try to always use some kind of safe cast and index lookup
 // sprinkle in `+` in rows to match up with vertical lines
 // print row and column headers
@@ -169,5 +449,9 @@ impl Game<'_> {
 // allow min_rows_cols all the way down to 1?
 // is it possible to fully avoid use of unwrap?
 // somehow make get_tile_from_indices less dangerous, by letting it have named parmams via some kind of struct?
-// generally do less casting
+//   and/or make it return a Result?
 // can I make COLUMN_HEADERS a vec and fill it up automatically?
+// add a 'help' command, maybe also reachable with 'h'?
+// choose carefully between iter, into_iter
+// can I find a way to need fewer Clone/Copy derives? Would mean passing references to players
+//   around, and dealing with lifetime issues when reconstructing board.
