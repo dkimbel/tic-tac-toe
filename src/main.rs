@@ -54,7 +54,7 @@ struct Coordinates {
 }
 
 impl Coordinates {
-    const COLUMN_LETTERS: [char; Game::MAX_NUM_ROWS_OR_COLUMNS as usize] =
+    const COLUMN_LETTERS: [char; Game::MAX_NUM_ROWS_OR_COLUMNS] =
         ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 
     fn from_indices(indices: &Indices) -> Result<Coordinates> {
@@ -366,35 +366,39 @@ impl Game {
     }
 
     fn render_board(&self) -> String {
-        // TODO add column headers and row numbers to rendered board
         let mut rendered_grid = String::new();
+        let column_headers = Coordinates::COLUMN_LETTERS
+            .iter()
+            .take(self.grid_dimensions)
+            .map(|char| format!(" {} ", char))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let column_header_row = format!("   {}\n", column_headers.dimmed());
+        rendered_grid.push_str(&column_header_row);
+        rendered_grid.push_str("\n");
         // NOTE: we operate on the assumption that the board is a square -- its
         // number of rows and columns are equal, and every one of them contains
         // the same number of items
-        for row_index in 0..self.grid_dimensions as usize {
+        for row_index in 0..self.grid_dimensions {
             let mut cells: Vec<String> = Vec::new();
-            for column_index in 0..self.grid_dimensions as usize {
+            for column_index in 0..self.grid_dimensions {
                 let coords = Coordinates::from_indices(&Indices {
                     row: row_index,
                     column: column_index,
                 })
                 .unwrap();
                 let tile = self.board.tiles.get(&coords).unwrap();
-                let cell_ending = if column_index + 1 < self.grid_dimensions as usize {
-                    '|'
-                } else {
-                    '\n'
-                };
                 cells.push(format!(" {} ", tile));
             }
+            let row_number = (row_index + 1).to_string();
             let tiles = cells.join("|");
-            let tiles_row = format!("{}\n", tiles);
+            let tiles_row = format!("{}  {}\n", row_number.dimmed(), tiles);
             rendered_grid.push_str(&tiles_row);
             // If the row we just added wasn't the last one...
-            if row_index + 1 < self.grid_dimensions as usize {
+            if row_index + 1 < self.grid_dimensions {
                 // ... then build and add a divider row.
                 let divider = vec!["---"; self.grid_dimensions].join("+");
-                let divider_row = format!("{}\n", divider);
+                let divider_row = format!("   {}\n", divider);
                 rendered_grid.push_str(&divider_row);
             }
         }
@@ -452,8 +456,8 @@ impl Game {
 // complete all TODOs in code above
 // handle fact that coords may already be occupied more gracefully (updating notification
 //   and setting tile color to red, and NOT terminating program)
-// use self.notification more widely
 // have notification say e.g. "last turn, player 1 placed their X at position B3".
+// use self.notification anywhere else applicable
 // how to ensure outdated notification has always been cleared? have a turn number on it, maybe?
 // if coords failed to parse, have some kind of special retry logic. Print prompt again?
 //   or perhaps print whole board again with updated error-containing board state, and even
@@ -461,7 +465,9 @@ impl Game {
 // show a nice error message with min and max row num / col header if out of bounds
 // ---
 // refactor column headers out to coordinates, renamed to something else?
+// refactor away `row_index + 1` in favor of something leveraging Coordinates
 // refactor render_board into a new Board.render fn, or even better, impl Display for board
+// refactor out opening three spaces from every row into something shared
 // find a way to mutate tiles, not rebuild whole board? only if I can prevent inconsistent state
 //   from partially-completed update, though. beware current way I set victory tiles one by one.
 // can I nuke Indices struct? if not, add comments to it and Coordinates about which is user-facing
@@ -505,3 +511,5 @@ impl Game {
 // choose carefully between iter, into_iter
 // can I find a way to need fewer Clone/Copy derives? Would mean passing references to players
 //   around, and dealing with lifetime issues when reconstructing board.
+// accept some kind of 'quit' or 'exit' command?
+// accept some kind of 'help' command?
