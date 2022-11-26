@@ -1,4 +1,3 @@
-use std::ascii;
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
@@ -10,7 +9,7 @@ use regex::Regex;
 
 fn main() -> Result<()> {
     let mut game = Game::new(3)?;
-    while game.winner == None {
+    while game.outcome == GameOutcome::InProgress {
         try_execute_turn(&mut game)?;
     }
     // render game board one last time to display final result
@@ -29,14 +28,14 @@ fn try_execute_turn(game: &mut Game) -> Result<()> {
         println!("{}", notification);
         println!();
     }
-    if game.winner == None {
+    if game.outcome == GameOutcome::InProgress {
         print!("Enter coordinates to place your {}: ", current_player.mark);
         io::stdout().flush()?;
         let mut unparsed_coords = String::new();
         io::stdin().read_line(&mut unparsed_coords)?;
         let coords = Coordinates::from_user_input(&unparsed_coords)?;
         game.update_board(coords, current_player)?;
-        game.check_for_victory();
+        game.update_outcome();
     }
     Ok(())
 }
@@ -147,6 +146,13 @@ impl fmt::Display for Notification {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum GameOutcome {
+    InProgress,
+    Draw,
+    Victory(Player),
+}
+
 #[derive(Debug)]
 struct Game {
     pub players: Vec<Player>,
@@ -154,7 +160,7 @@ struct Game {
     notification: Option<Notification>,
     grid_dimensions: usize,
     turn_number: usize,
-    winner: Option<Player>,
+    outcome: GameOutcome,
 }
 
 impl Game {
@@ -200,11 +206,8 @@ impl Game {
     //   - either player occupies every tile in a single row
     //   - either player occupies every tile in a single column
     //   - either player occupies every tile in a full-length diagonal
-    // We evaluate the full set of tiles twice (once for columns and once for
-    // rows); we could optimize this down to one evaluation, though. We also
-    // build the collection of rows/columns/diagonals that can result in victory
-    // every time; we could instead do this only one time, at game start.
-    fn check_for_victory(&mut self) {
+    // also checks for a draw (all tiles are occupied, but there is no victor)
+    fn update_outcome(&mut self) {
         let mut possible_winning_indices_sets: Vec<Vec<Indices>> = Vec::new();
 
         // build a list of indices for each row of game board
@@ -252,7 +255,7 @@ impl Game {
         for indices_set in possible_winning_indices_sets {
             let maybe_winner = self.single_player_occupying_indices(&indices_set);
             if let Some(player) = maybe_winner {
-                self.winner = Some(player);
+                self.outcome = GameOutcome::Victory(player);
                 self.notification = Some(Notification {
                     message: format!("{} wins!", player),
                     notification_type: NotificationType::Success,
@@ -270,7 +273,26 @@ impl Game {
             }
         }
 
-        // we will only reach this point if there was no winner
+        // we will only reach this point if no one has won yet; if every tile is in fact
+        // occupied, the game must be a draw
+        let all_tiles_occupied =
+            self.board
+                .tiles
+                .iter()
+                .all(|(_, tile)| match tile.occupation_state {
+                    TileOccupationState::Occupied(_) => true,
+                    _ => false,
+                });
+        if all_tiles_occupied {
+            self.outcome = GameOutcome::Draw;
+            self.notification = Some(Notification {
+                message: format!("The game ends in a draw!"),
+                notification_type: NotificationType::Info,
+            });
+            return;
+        }
+
+        // we will only reach this point if the game is still InProgress
         self.advance_turn();
     }
 
@@ -391,7 +413,7 @@ impl Game {
             notification: None,
             grid_dimensions: num_rows_or_columns,
             turn_number: 1,
-            winner: None,
+            outcome: GameOutcome::InProgress,
         })
     }
 }
@@ -420,7 +442,8 @@ impl Game {
 // maybe display most recent move in yellow or something? to more easily see
 //   what changed? (an alternative is bold text)
 // provide friendly error message if coords unparsable
-// refactor check_for_victory into several fns? it does a lot. also figure out how best to advnce turn
+// refactor update_outcome into several fns? it does a lot. also figure out how best to advnce turn
+// any way to combine victory checks with draw check, to iterate through all tiles just once?
 // try to have current-tile lookup and tile-replacement logic share a single get call if possible
 // accept user input for num rows/cols, and have some kind of 'welcome to game' message
 // don't recompile regex on every turn
