@@ -5,6 +5,7 @@ use std::io::{self, Write};
 use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Result};
+use colored::*;
 use regex::Regex;
 
 fn main() -> Result<()> {
@@ -94,6 +95,29 @@ struct Tile {
     display_state: TileDisplayState,
 }
 
+impl fmt::Display for Tile {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use TileDisplayState::*;
+        use TileOccupationState::*;
+        write!(
+            f,
+            "{}",
+            match self.occupation_state {
+                Empty => " ".normal(),
+                Occupied(player) => {
+                    let mark = String::from(player.mark);
+                    match self.display_state {
+                        NewlyCreated => mark.bold(),
+                        Victory => mark.green().bold(),
+                        Error => mark.red().bold(),
+                        Normal => mark.normal(),
+                    }
+                }
+            }
+        )
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 enum TileOccupationState {
     Empty,
@@ -101,7 +125,7 @@ enum TileOccupationState {
 }
 
 // lets us render the winning line of tiles in green
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum TileDisplayState {
     Error,
     NewlyCreated,
@@ -142,7 +166,17 @@ struct Notification {
 
 impl fmt::Display for Notification {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
+        use NotificationType::*;
+        let message = &self.message;
+        write!(
+            f,
+            "{}",
+            match self.notification_type {
+                Success => message.green().bold(),
+                Info => message.normal(),
+                Error => format!("{} {}", "Error!".red().bold(), message).normal(),
+            }
+        )
     }
 }
 
@@ -332,6 +366,7 @@ impl Game {
     }
 
     fn render_board(&self) -> String {
+        // TODO add column headers and row numbers to rendered board
         let mut rendered_grid = String::new();
         // NOTE: we operate on the assumption that the board is a square -- its
         // number of rows and columns are equal, and every one of them contains
@@ -345,25 +380,21 @@ impl Game {
                 })
                 .unwrap();
                 let tile = self.board.tiles.get(&coords).unwrap();
-                use TileOccupationState::*;
-                let tile_mark = match tile.occupation_state {
-                    Empty => ' ',
-                    Occupied(player) => player.mark,
-                };
                 let cell_ending = if column_index + 1 < self.grid_dimensions as usize {
                     '|'
                 } else {
                     '\n'
                 };
-                let cell = &format!(" {} {}", tile_mark, cell_ending);
+                let cell = &format!(" {} {}", tile, cell_ending);
                 rendered_row.push_str(cell);
             }
             rendered_grid.push_str(&rendered_row);
-            // if the row we just added wasn't the last one...
+            // If the row we just added wasn't the last one...
             if row_index + 1 < self.grid_dimensions as usize {
-                // ... then build and add a divider row. We subtract 1 from the length to account
-                // for the newline at the end.
-                let divider_row = format!("{}\n", "-".repeat(rendered_row.len() - 1));
+                // ... then build and add a divider row.
+                // TODO fix regression where row divider gets double-printed. Based on str len being interfered with?
+                // TODO sprinkle in `+` in rows to match up with vertical lines
+                let divider_row = format!("{}\n", "-".repeat(self.grid_dimensions * 4 - 1));
                 rendered_grid.push_str(&divider_row);
             }
         }
@@ -418,22 +449,19 @@ impl Game {
     }
 }
 
-// actually do render winning line of marks in green (using `termcolor` lib)
+// complete all TODOs in code above
 // handle fact that coords may already be occupied more gracefully (updating notification
 //   and setting tile color to red, and NOT terminating program)
-// add column headers and row numbers to rendered board
 // use self.notification more widely
 // have notification say e.g. "last turn, player 1 placed their X at position B3".
 // how to ensure outdated notification has always been cleared? have a turn number on it, maybe?
 // if coords failed to parse, have some kind of special retry logic. Print prompt again?
 //   or perhaps print whole board again with updated error-containing board state, and even
 //   with some kind of persisted message attribute to print?
-// have color printing in notifications (e.g. winning message in green, at least part of
-//   any error message in red; may require a Notification struct with message and type,
-//   where type determines color and will prepend a red ERROR)
 // show a nice error message with min and max row num / col header if out of bounds
+// ---
 // refactor column headers out to coordinates, renamed to something else?
-// refactor render_board into a new Board.render fn
+// refactor render_board into a new Board.render fn, or even better, impl Display for board
 // find a way to mutate tiles, not rebuild whole board? only if I can prevent inconsistent state
 //   from partially-completed update, though. beware current way I set victory tiles one by one.
 // can I nuke Indices struct? if not, add comments to it and Coordinates about which is user-facing
@@ -465,7 +493,6 @@ impl Game {
 // remove many Debug derives
 // can I clean up 'cell' logic using map + join, so I join with '|' char?
 // try to always use some kind of safe cast and index lookup
-// sprinkle in `+` in rows to match up with vertical lines
 // print row and column headers
 // maybe clean up logic for how we look up tiles -- by indices always? by 'coords' always?
 // maybe clean up how we build coords, so it's more foolproof about adding 1 to convert 0-indexed to 1
