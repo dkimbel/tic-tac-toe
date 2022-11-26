@@ -372,7 +372,7 @@ impl Game {
         // number of rows and columns are equal, and every one of them contains
         // the same number of items
         for row_index in 0..self.grid_dimensions as usize {
-            let mut rendered_row = String::new();
+            let mut cells: Vec<String> = Vec::new();
             for column_index in 0..self.grid_dimensions as usize {
                 let coords = Coordinates::from_indices(&Indices {
                     row: row_index,
@@ -385,16 +385,16 @@ impl Game {
                 } else {
                     '\n'
                 };
-                let cell = &format!(" {} {}", tile, cell_ending);
-                rendered_row.push_str(cell);
+                cells.push(format!(" {} ", tile));
             }
-            rendered_grid.push_str(&rendered_row);
+            let tiles = cells.join("|");
+            let tiles_row = format!("{}\n", tiles);
+            rendered_grid.push_str(&tiles_row);
             // If the row we just added wasn't the last one...
             if row_index + 1 < self.grid_dimensions as usize {
                 // ... then build and add a divider row.
-                // TODO fix regression where row divider gets double-printed. Based on str len being interfered with?
-                // TODO sprinkle in `+` in rows to match up with vertical lines
-                let divider_row = format!("{}\n", "-".repeat(self.grid_dimensions * 4 - 1));
+                let divider = vec!["---"; self.grid_dimensions].join("+");
+                let divider_row = format!("{}\n", divider);
                 rendered_grid.push_str(&divider_row);
             }
         }
