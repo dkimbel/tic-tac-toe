@@ -29,13 +29,26 @@ fn try_execute_turn(game: &mut Game) -> Result<()> {
         println!("{}", notification);
         println!();
     }
+    // having printed prior notification, clear it
+    game.notification = None;
     if game.outcome == GameOutcome::InProgress {
         print!("Enter coordinates to place your {}: ", current_player.mark);
         io::stdout().flush()?;
         let mut unparsed_coords = String::new();
         io::stdin().read_line(&mut unparsed_coords)?;
         let coords = Coordinates::from_user_input(&unparsed_coords)?;
-        game.update_board(coords, current_player)?;
+        // in case of error, set up error notification, turn tile at relevant coordinates red,
+        // and retry turn (ask for user input again)
+        if let Err(error) = game.update_board(coords, current_player) {
+            game.notification = Some(Notification {
+                message: error.to_string(),
+                notification_type: NotificationType::Error,
+            });
+            if let Some(mut error_tile) = game.board.tiles.get_mut(&coords) {
+                error_tile.display_state = TileDisplayState::Error;
+            }
+            return try_execute_turn(game);
+        }
         game.update_outcome();
     }
     Ok(())
@@ -209,11 +222,15 @@ impl Game {
         // validate against both the "coordinates don't even exist on game board"
         // and the "coordinates refer to an already-occupied tile" edge cases
         let tile_for_move: &Tile = self.board.tiles.get(&coords_for_move).context(format!(
-            "Could not find coordinates {} on game board",
+            "Could not find coordinates {} on game board.",
             coords_for_move
         ))?;
         if let TileOccupationState::Occupied(player) = tile_for_move.occupation_state {
-            return Err(anyhow!("Tile already occupied by {}", player));
+            return Err(anyhow!(
+                "Tile {} is already occupied by {}.",
+                coords_for_move,
+                player
+            ));
         }
 
         // assemble new game board, clearing any previous display states from tiles
@@ -453,16 +470,13 @@ impl Game {
     }
 }
 
-// complete all TODOs in code above
-// handle fact that coords may already be occupied more gracefully (updating notification
-//   and setting tile color to red, and NOT terminating program)
-// have notification say e.g. "last turn, player 1 placed their X at position B3".
-// use self.notification anywhere else applicable
-// how to ensure outdated notification has always been cleared? have a turn number on it, maybe?
-// if coords failed to parse, have some kind of special retry logic. Print prompt again?
+// TODO have notification say e.g. "last turn, player 1 placed their X at position B3".
+// TODO use self.notification anywhere else applicable
+// TODO if coords failed to parse, have some kind of special retry logic. Print prompt again?
 //   or perhaps print whole board again with updated error-containing board state, and even
 //   with some kind of persisted message attribute to print?
-// show a nice error message with min and max row num / col header if out of bounds
+// TODO show a nice error message with min and max row num / col header if out of bounds
+// complete all TODOs above and below
 // ---
 // refactor column headers out to coordinates, renamed to something else?
 // refactor away `row_index + 1` in favor of something leveraging Coordinates
@@ -472,11 +486,13 @@ impl Game {
 //   from partially-completed update, though. beware current way I set victory tiles one by one.
 // can I nuke Indices struct? if not, add comments to it and Coordinates about which is user-facing
 // refactor get_tile_from_indices to use Indices struct?
+// refactor to not call try_execute_turn from itself? rather only call into a smaller helper fun?
 // refactor so you'd only have a Coordinates object if it fit within game's board dimensions?
 // maybe display most recent move in yellow or something? to more easily see
 //   what changed? (an alternative is bold text)
 // provide friendly error message if coords unparsable
 // refactor update_outcome into several fns? it does a lot. also figure out how best to advnce turn
+// refactor try_execute_turn to be a method on game?
 // any way to combine victory checks with draw check, to iterate through all tiles just once?
 // try to have current-tile lookup and tile-replacement logic share a single get call if possible
 // accept user input for num rows/cols, and have some kind of 'welcome to game' message
