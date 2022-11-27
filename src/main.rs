@@ -39,12 +39,12 @@ fn try_execute_turn(game: &mut Game) -> Result<()> {
         io::stdout().flush()?;
         let mut unparsed_coords = String::new();
         io::stdin().read_line(&mut unparsed_coords)?;
-        // TODO if coords failed to parse, retry instead of exiting program; include example of valid coords?
-        //   or perhaps print whole board again with updated error-containing board state, and even
-        //   with some kind of persisted message attribute to print?
-        let coords = Coordinates::from_user_input(&unparsed_coords)?;
-        // in case of error, set up error notification, turn tile at relevant coordinates red,
-        // and retry turn (ask for user input again)
+        let coords_result = Coordinates::from_user_input(&unparsed_coords);
+        if let Err(error) = coords_result {
+            handle_error(game, error, None);
+            return try_execute_turn(game);
+        }
+        let coords = coords_result.unwrap(); // safe thanks to line above
         if let Err(error) = game.update_board(coords, current_player) {
             handle_error(game, error, Some(coords));
             return try_execute_turn(game);
@@ -98,9 +98,10 @@ impl Coordinates {
         // the character and digits (just not within the digits).
         let re =
             Regex::new(r"^[\s|[[:punct:]]]*([[:alpha:]])[\s|[[:punct:]]]*(\d+)[\s|[[:punct:]]]*$")?;
-        let cap = re
-            .captures(input)
-            .context(format!("Could not parse '{}' as coords.", input.trim()))?;
+        let cap = re.captures(input).context(format!(
+            "Could not parse '{}' as coordinates. Valid example: A1",
+            input.trim()
+        ))?;
         let column = char::from_str(&cap[1])?.to_ascii_uppercase();
         let row = usize::from_str(&cap[2])?;
         Ok(Self { column, row })
@@ -482,6 +483,9 @@ impl Game {
     }
 }
 
+// refactor try_execute_turn error-handling logic to not repeat handle_error call, and to not
+//   need `unwrap`; one tricky point is conditionally having coords to turn red, and having
+//   different success types from our two results (Coordinates versus ()).
 // refactor column headers out to coordinates, renamed to something else?
 // refactor away `row_index + 1` in favor of something leveraging Coordinates
 // refactor render_board into a new Board.render fn, or even better, impl Display for board
