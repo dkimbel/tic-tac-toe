@@ -72,7 +72,7 @@ struct Indices {
     row: usize,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 struct Coordinates {
     column: char,
     row: usize, // one-indexed!
@@ -115,7 +115,6 @@ impl fmt::Display for Coordinates {
     }
 }
 
-#[derive(Debug)]
 struct Tile {
     occupation_state: TileOccupationState,
     display_state: TileDisplayState,
@@ -144,14 +143,14 @@ impl fmt::Display for Tile {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 enum TileOccupationState {
     Empty,
     Occupied(Player),
 }
 
 // lets us render the winning line of tiles in green
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 enum TileDisplayState {
     Error,
     NewlyCreated,
@@ -159,12 +158,11 @@ enum TileDisplayState {
     Victory,
 }
 
-#[derive(Debug)]
 struct Board {
     tiles: HashMap<Coordinates, Tile>,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy)]
 struct Player {
     number: u8,
     mark: char,
@@ -177,14 +175,12 @@ impl fmt::Display for Player {
     }
 }
 
-#[derive(Debug)]
 enum NotificationType {
     Success,
     Info,
     Error,
 }
 
-#[derive(Debug)]
 struct Notification {
     message: String,
     notification_type: NotificationType,
@@ -206,14 +202,13 @@ impl fmt::Display for Notification {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 enum GameOutcome {
     InProgress,
     Draw,
     Victory(Player),
 }
 
-#[derive(Debug)]
 struct Game {
     pub players: Vec<Player>,
     board: Board,
@@ -224,7 +219,7 @@ struct Game {
 }
 
 impl Game {
-    const MIN_NUM_ROWS_OR_COLUMNS: usize = 3;
+    const MIN_NUM_ROWS_OR_COLUMNS: usize = 1;
     const MAX_NUM_ROWS_OR_COLUMNS: usize = 8;
 
     fn update_board(
@@ -483,6 +478,11 @@ impl Game {
     }
 }
 
+// flesh out README
+// try embedding an mp4 in README
+// can I clean up 'cell' logic using map + join, so I join with '|' char?
+// clear tile states at start of turn, so e.g. an earlier error's red tile won't show up for a
+//   later coords-parsing error?
 // refactor try_execute_turn error-handling logic to not repeat handle_error call, and to not
 //   need `unwrap`; one tricky point is conditionally having coords to turn red, and having
 //   different success types from our two results (Coordinates versus ()).
@@ -496,45 +496,29 @@ impl Game {
 // refactor get_tile_from_indices to use Indices struct?
 // refactor to not call try_execute_turn from itself? rather only call into a smaller helper fun?
 // refactor so you'd only have a Coordinates object if it fit within game's board dimensions?
-// maybe display most recent move in yellow or something? to more easily see
-//   what changed? (an alternative is bold text)
-// provide friendly error message if coords unparsable
+// only build vec of vecs for rows/cols/diagonals that can result in victory one time, on game init
+//   and try to do 1x pass to build col + row vecs, not 2x passes
 // refactor update_outcome into several fns? it does a lot. also figure out how best to advnce turn
-// refactor try_execute_turn to be a method on game?
+// refactor try_execute_turn to be a method on game? only question is whether `main` should be the
+//   one dealing with user inputs or whether that really does belong in Game instead
 // any way to combine victory checks with draw check, to iterate through all tiles just once?
 // try to have current-tile lookup and tile-replacement logic share a single get call if possible
-// accept user input for num rows/cols, and have some kind of 'welcome to game' message
 // don't recompile regex on every turn
 // sort out naming of 'indices' versus 'indices set'; latter isn't actually a set (but could be!)
 // use official turn-building logic even during init?
 // try to insert more context into my various error messages -- like, include any relevant coordinates
-// only build vec of vecs for rows/cols/diagonals that can result in victory one time, on game init
 // stash max_index somewhere so it's only defined once? and/or have a fn to calculate it?
 // do I need both a get_tile_from_indices and a get_mut_tile_from_indices? how to obviate need for both?
 // refactor out to multiple modules/files
 // refactor win-detection logic to something more elegant, that at least doesn't repeat self.winner assignment
 // fix up cross-talk between Coordinates and Game (Coordinates refers to an attr of Game)
-// optimize rows and columns building to a single iteration (in advance of victory check)
-//   try to do the same for diagonals: one iteration not two
-//   then update now-outdated comment above fn
 // share any coordinates-validating logic between initial game setup and within-turn user-input validation
 // refactor to smaller functions, esp with more `new()` functions
 // add test coverage, esp for coordinates parsing and full-game execution
-// remove many Debug derives
-// can I clean up 'cell' logic using map + join, so I join with '|' char?
-// try to always use some kind of safe cast and index lookup
-// print row and column headers
 // maybe clean up logic for how we look up tiles -- by indices always? by 'coords' always?
 // maybe clean up how we build coords, so it's more foolproof about adding 1 to convert 0-indexed to 1
-// allow min_rows_cols all the way down to 1?
 // is it possible to fully avoid use of unwrap?
 // somehow make get_tile_from_indices less dangerous, by letting it have named parmams via some kind of struct?
 //   and/or make it return a Result?
-// can I make COLUMN_HEADERS a vec and fill it up automatically?
-// add a 'help' command, maybe also reachable with 'h'?
 // choose carefully between iter, into_iter
-// can I find a way to need fewer Clone/Copy derives? Would mean passing references to players
-//   around, and dealing with lifetime issues when reconstructing board.
-// accept some kind of 'quit' or 'exit' command?
-// accept some kind of 'help' command?
 // am I handling every possible error? see context, anyhow!, unwrap, `?`
