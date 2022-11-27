@@ -4,7 +4,7 @@ use std::fmt::Formatter;
 use std::io::{self, Write};
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Context, Error, Result};
 use colored::*;
 use regex::Regex;
 
@@ -21,8 +21,7 @@ fn main() -> Result<()> {
 fn try_execute_turn(game: &mut Game) -> Result<()> {
     clearscreen::clear()?;
     let current_player = game.get_current_turn_player();
-    println!("{}'s turn", current_player);
-    println!();
+    println!(); // newline to ensure a command-line prompt doesn't skew first line of game board
     println!("{}", game.render_board());
     // print notification, if any
     if let Some(notification) = &game.notification {
@@ -32,26 +31,39 @@ fn try_execute_turn(game: &mut Game) -> Result<()> {
     // having printed prior notification, clear it
     game.notification = None;
     if game.outcome == GameOutcome::InProgress {
-        print!("Enter coordinates to place your {}: ", current_player.mark);
+        print!(
+            "{}, enter coordinates to place your {}: ",
+            current_player.to_string().bold(),
+            current_player.mark
+        );
         io::stdout().flush()?;
         let mut unparsed_coords = String::new();
         io::stdin().read_line(&mut unparsed_coords)?;
+        // TODO if coords failed to parse, retry instead of exiting program; include example of valid coords?
+        //   or perhaps print whole board again with updated error-containing board state, and even
+        //   with some kind of persisted message attribute to print?
         let coords = Coordinates::from_user_input(&unparsed_coords)?;
         // in case of error, set up error notification, turn tile at relevant coordinates red,
         // and retry turn (ask for user input again)
         if let Err(error) = game.update_board(coords, current_player) {
-            game.notification = Some(Notification {
-                message: error.to_string(),
-                notification_type: NotificationType::Error,
-            });
-            if let Some(mut error_tile) = game.board.tiles.get_mut(&coords) {
-                error_tile.display_state = TileDisplayState::Error;
-            }
+            handle_error(game, error, Some(coords));
             return try_execute_turn(game);
         }
         game.update_outcome();
     }
     Ok(())
+}
+
+fn handle_error(game: &mut Game, error: Error, maybe_coords: Option<Coordinates>) -> () {
+    game.notification = Some(Notification {
+        message: error.to_string(),
+        notification_type: NotificationType::Error,
+    });
+    if let Some(coords) = maybe_coords {
+        if let Some(mut error_tile) = game.board.tiles.get_mut(&coords) {
+            error_tile.display_state = TileDisplayState::Error;
+        }
+    }
 }
 
 // zero-indexed!
@@ -73,7 +85,7 @@ impl Coordinates {
     fn from_indices(indices: &Indices) -> Result<Coordinates> {
         let row = indices.row + 1;
         let &column = Self::COLUMN_LETTERS.get(indices.column).context(format!(
-            "No letter found to match zero-indexed column number {}; there are {} letter(s) total",
+            "No letter found to match zero-indexed column number {}; there are {} letter(s) total.",
             indices.column,
             Self::COLUMN_LETTERS.len()
         ))?;
@@ -88,7 +100,7 @@ impl Coordinates {
             Regex::new(r"^[\s|[[:punct:]]]*([[:alpha:]])[\s|[[:punct:]]]*(\d+)[\s|[[:punct:]]]*$")?;
         let cap = re
             .captures(input)
-            .context(format!("Could not parse '{}' as coords", input.trim()))?;
+            .context(format!("Could not parse '{}' as coords.", input.trim()))?;
         let column = char::from_str(&cap[1])?.to_ascii_uppercase();
         let row = usize::from_str(&cap[2])?;
         Ok(Self { column, row })
@@ -427,7 +439,7 @@ impl Game {
             || num_rows_or_columns > Self::MAX_NUM_ROWS_OR_COLUMNS
         {
             return Err(anyhow!(
-                "Number of rows/columns on game board must be between {} and {}",
+                "Number of rows/columns on game board must be between {} and {}.",
                 Self::MIN_NUM_ROWS_OR_COLUMNS,
                 Self::MAX_NUM_ROWS_OR_COLUMNS
             ));
@@ -470,14 +482,6 @@ impl Game {
     }
 }
 
-// TODO have notification say e.g. "last turn, player 1 placed their X at position B3".
-// TODO use self.notification anywhere else applicable
-// TODO if coords failed to parse, have some kind of special retry logic. Print prompt again?
-//   or perhaps print whole board again with updated error-containing board state, and even
-//   with some kind of persisted message attribute to print?
-// TODO show a nice error message with min and max row num / col header if out of bounds
-// complete all TODOs above and below
-// ---
 // refactor column headers out to coordinates, renamed to something else?
 // refactor away `row_index + 1` in favor of something leveraging Coordinates
 // refactor render_board into a new Board.render fn, or even better, impl Display for board
@@ -529,3 +533,4 @@ impl Game {
 //   around, and dealing with lifetime issues when reconstructing board.
 // accept some kind of 'quit' or 'exit' command?
 // accept some kind of 'help' command?
+// am I handling every possible error? see context, anyhow!, unwrap, `?`
