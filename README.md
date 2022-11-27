@@ -2,7 +2,9 @@
 
 ## Background
 
-I wrote this program as a coding exercise. It's meant for two players to use together locally (sharing the same computer). For an example of gameplay, see the video below.
+I wrote this program as a coding exercise. It's meant for two people to play together, sharing the same computer.
+
+## Gameplay
 
 ## Running the code locally
 
